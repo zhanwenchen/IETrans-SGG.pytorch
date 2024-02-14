@@ -71,7 +71,7 @@ print(len(all_triplet_rels), len(all_triplet_subs), len(all_triplet_objs), all_t
 assert len(all_triplet_rels) == len(all_triplet_subs) == len(all_triplet_objs) == len(all_triplet_logits)
 assert n == len(all_triplet_rels)
 assert len(all_triplet_idxs) == len(all_triplet_rels)
-all_changes = np.zeros_like(all_triplet_rels, dtype=np.float)
+all_changes = np.zeros_like(all_triplet_rels, dtype=float)
 
 def vis_triplet(triplet):
     logit = rel_dic[triplet[0]][(triplet[1], triplet[2])]

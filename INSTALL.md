@@ -27,21 +27,20 @@ Most of the requirements of this projects are exactly the same as [Scene-Graph-B
 # for that, check that `which conda`, `which pip` and `which python` points to the
 # right path. From a clean conda env, this is what you need to do
 
-conda create --name scene_graph_benchmark
-conda activate scene_graph_benchmark
+conda create --name ietrans
+conda activate ietrans
 
 # this installs the right pip and dependencies for the fresh python
-conda install ipython
-conda install scipy
-conda install h5py
+conda install python=3.11 ipython scipy h5py
 
 # scene_graph_benchmark and coco api dependencies
 pip install ninja yacs cython matplotlib tqdm opencv-python overrides
 
 # follow PyTorch installation in https://pytorch.org/get-started/locally/
 # we give the instructions for CUDA 10.2
-conda install pytorch==1.6.0 torchvision==0.6.0 cudatoolkit=10.2 -c pytorch
-
+# conda install pytorch==1.6.0 torchvision==0.6.0 cudatoolkit=10.2 -c pytorch
+# conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
+conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
 export INSTALL_DIR=$PWD
 
 # install pycocotools

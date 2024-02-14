@@ -42,13 +42,13 @@ except ImportError:
 
 def train(cfg, local_rank, distributed, logger):
     debug_print(logger, 'prepare training')
-    model = build_detection_model(cfg) 
+    model = build_detection_model(cfg)
     debug_print(logger, 'end model construction')
 
     # modules that should be always set in eval mode
     # their eval() method should be called after model.train() is called
     eval_modules = (model.rpn, model.backbone, model.roi_heads.box,)
- 
+
     fix_eval_modules(eval_modules)
 
     # NOTE, we slow down the LR of the layers start with the names in slow_heads
@@ -61,7 +61,7 @@ def train(cfg, local_rank, distributed, logger):
     # load pretrain layers to new layers
     load_mapping = {"roi_heads.relation.box_feature_extractor" : "roi_heads.box.feature_extractor",
                     "roi_heads.relation.union_feature_extractor.feature_extractor" : "roi_heads.box.feature_extractor"}
-    
+
     if cfg.MODEL.ATTRIBUTE_ON:
         load_mapping["roi_heads.relation.att_feature_extractor"] = "roi_heads.attribute.feature_extractor"
         load_mapping["roi_heads.relation.union_feature_extractor.att_feature_extractor"] = "roi_heads.attribute.feature_extractor"
@@ -116,6 +116,11 @@ def train(cfg, local_rank, distributed, logger):
         mode='val',
         is_distributed=distributed,
     )
+    data_loaders_test = make_data_loader(
+        cfg,
+        mode='test',
+        is_distributed=distributed,
+    )
     debug_print(logger, 'end dataloader')
     checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
 
@@ -129,6 +134,11 @@ def train(cfg, local_rank, distributed, logger):
     start_iter = arguments["iteration"]
     start_training_time = time.time()
     end = time.time()
+
+    to_val = cfg.SOLVER.TO_VAL
+    to_test = cfg.SOLVER.TO_TEST
+    val_period = cfg.SOLVER.VAL_PERIOD
+
 
     print_first_grad = True
     for iteration, (images, targets, _) in enumerate(train_data_loader, start_iter):
@@ -198,11 +208,22 @@ def train(cfg, local_rank, distributed, logger):
             checkpointer.save("model_final", **arguments)
 
         val_result = None # used for scheduler updating
-        if cfg.SOLVER.TO_VAL and iteration % cfg.SOLVER.VAL_PERIOD == 0:
-            logger.info("Start validating")
-            val_result = run_val(cfg, model, val_data_loaders, distributed, logger)
-            logger.info("Validation Result: %.4f" % val_result)
- 
+        # if cfg.SOLVER.TO_VAL and iteration % cfg.SOLVER.VAL_PERIOD == 0:
+        #     logger.info("Start validating")
+        #     val_result = run_val(cfg, model, val_data_loaders, distributed, logger)
+        #     logger.info("Validation Result: %.4f" % val_result)
+
+        if iteration % val_period == 0:
+            if to_val:
+                logger.info(f"iteration={iteration}: Start validating")
+        #     val_result = run_val(cfg, model, val_data_loaders, distributed, logger)
+                result_val = run_val(cfg, model, val_data_loaders, distributed, logger)
+                logger.info(f"iteration={iteration}: Validation Result: %.4f" % result_val)
+            if to_test:
+                logger.info(f"iteration={iteration}: Start testing")
+        #     val_result = run_val(cfg, model, val_data_loaders, distributed, logger)
+                result_test = run_val(cfg, model, data_loaders_test, distributed, logger)
+                logger.info(f"iteration={iteration}: Test Result: %.4f" % result_test)
         # scheduler should be called after optimizer.step() in pytorch>=1.1.0
         # https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
         if cfg.SOLVER.SCHEDULE.TYPE == "WarmupReduceLROnPlateau":

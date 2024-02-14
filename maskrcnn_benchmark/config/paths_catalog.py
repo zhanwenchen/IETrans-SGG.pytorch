@@ -6,7 +6,7 @@ import copy
 
 
 class DatasetCatalog(object):
-    DATA_DIR = "datasets"
+    DATA_DIR = os.environ['DATASETS_DIR']
     DATASETS = {
         "coco_2017_train": {
             "img_dir": "coco/train2017",
@@ -105,60 +105,18 @@ class DatasetCatalog(object):
             "img_dir": "cityscapes/images",
             "ann_file": "cityscapes/annotations/instancesonly_filtered_gtFine_test.json"
         },
-        # VG
-        "20VG_stanford_filtered_with_attribute": {
+        "VG_stanford_filtered": {
             "img_dir": "vg/VG_100K",
-            "roidb_file": "vg/20/VG-SGG-with-attri.h5",
-            "dict_file": "vg/20/VG-SGG-dicts-with-attri.json",
+            "roidb_file": "vg/VG-SGG.h5",
+            "dict_file": "vg/VG-SGG-dicts.json",
             "image_file": "vg/image_data.json",
         },
-        "20DS_VG_VGKB": {
+        "VG_stanford_filtered_with_attribute": {
             "img_dir": "vg/VG_100K",
-            "roidb_file": "vg/20/VG-SGG-with-attri.h5",
-            "dict_file": "vg/20/VG-SGG-dicts-with-attri.json",
+            "roidb_file": "vg/VG-SGG-with-attri.h5",
+            "dict_file": "vg/VG-SGG-dicts-with-attri.json",
             "image_file": "vg/image_data.json",
-            "distant_supervsion_file": "vg/20/VGKB.json",
-        },
-        "20DS_VG_CCKB": {
-            "img_dir": "vg/VG_100K",
-            "roidb_file": "vg/20/VG-SGG-with-attri.h5",
-            "dict_file": "vg/20/VG-SGG-dicts-with-attri.json",
-            "image_file": "vg/image_data.json",
-            "distant_supervsion_file": "vg/20/CCKB.json",
-        },
-        "50VG_stanford_filtered_with_attribute": {
-            "img_dir": "vg/VG_100K",
-            "roidb_file": "vg/50/VG-SGG-with-attri.h5",
-            "dict_file": "vg/50/VG-SGG-dicts-with-attri.json",
-            "image_file": "vg/image_data.json",
-        },
-        "50DS_VG_VGKB": {
-            "img_dir": "vg/VG_100K",
-            "roidb_file": "vg/50/VG-SGG-with-attri.h5",
-            "dict_file": "vg/50/VG-SGG-dicts-with-attri.json",
-            "image_file": "vg/image_data.json",
-            "distant_supervsion_file": "vg/50/VGKB.json",
-        },
-        "50DS_VG_CCKB": {
-            "img_dir": "vg/VG_100K",
-            "roidb_file": "vg/50/VG-SGG-with-attri.h5",
-            "dict_file": "vg/50/VG-SGG-dicts-with-attri.json",
-            "image_file": "vg/image_data.json",
-            "distant_supervsion_file": "vg/50/CCKB.json",
-        },
-        # 1000 rels
-        "1000VG_stanford_filtered_with_attribute": {
-            "img_dir": "vg/VG_100K",
-            "roidb_file": "vg/1000/VG.h5",
-            "dict_file": "vg/1000/VG-dicts.json",
-            "image_file": "vg/image_data.json",
-        },
-        "1000DS_VG_VGKB": {
-            "img_dir": "vg/VG_100K",
-            "roidb_file": "vg/1000/VG.h5",
-            "dict_file": "vg/1000/VG-dicts.json",
-            "image_file": "vg/image_data.json",
-            "distant_supervsion_file": "vg/1000/VGKB.json",
+            "capgraphs_file": "vg/vg_capgraphs_anno.json",
         },
     }
 
@@ -186,7 +144,7 @@ class DatasetCatalog(object):
                 factory="PascalVOCDataset",
                 args=args,
             )
-        elif ("VG" in name) or ('GQA' in name) or ("VRD" in name):
+        elif ("VG" in name) or ('GQA' in name):
             # name should be something like VG_stanford_filtered_train
             p = name.rfind("_")
             name, split = name[:p], name[p+1:]
@@ -196,6 +154,7 @@ class DatasetCatalog(object):
             for k, v in args.items():
                 args[k] = os.path.join(data_dir, v)
             args['split'] = split
+            args['use_graft'] = cfg.SOLVER.AUGMENTATION.USE_GRAFT
             # IF MODEL.RELATION_ON is True, filter images with empty rels
             # else set filter to False, because we need all images for pretraining detector
             args['filter_non_overlap'] = (not cfg.MODEL.ROI_RELATION_HEAD.USE_GT_BOX) and cfg.MODEL.RELATION_ON and cfg.MODEL.ROI_RELATION_HEAD.REQUIRE_BOX_OVERLAP
@@ -203,14 +162,7 @@ class DatasetCatalog(object):
             args['flip_aug'] = cfg.MODEL.FLIP_AUG
             args['custom_eval'] = cfg.TEST.CUSTUM_EVAL
             args['custom_path'] = cfg.TEST.CUSTUM_PATH
-            args['custom_bbox_path'] = cfg.TEST.CUSTUM_BBOX_PATH
-            if ("DS" in name):
-                if cfg.WSUPERVISE.SPECIFIED_DATA_FILE is not None:
-                    args['specified_data_file'] = cfg.WSUPERVISE.SPECIFIED_DATA_FILE
-                return dict(
-                    factory=cfg.WSUPERVISE.DATASET,
-                    args=args,
-                )
+            args['with_clean_classifier'] = cfg.MODEL.ROI_RELATION_HEAD.WITH_CLEAN_CLASSIFIER
             return dict(
                 factory="VGDataset",
                 args=args,
