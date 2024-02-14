@@ -31,6 +31,8 @@ from maskrcnn_benchmark.utils.imports import import_file
 from maskrcnn_benchmark.utils.logger import setup_logger, debug_print
 from maskrcnn_benchmark.utils.miscellaneous import mkdir, save_config
 from maskrcnn_benchmark.utils.metric_logger import MetricLogger
+from maskrcnn_benchmark.utils.relation_augmentation import RelationAugmenter
+from maskrcnn_benchmark.data import VGStats
 
 
 # See if we can use apex.DistributedDataParallel instead of the torch default,
@@ -140,6 +142,18 @@ def train(cfg, local_rank, distributed, logger):
     to_test = cfg.SOLVER.TO_TEST
     val_period = cfg.SOLVER.VAL_PERIOD
 
+    use_semantic = cfg.SOLVER.AUGMENTATION.USE_SEMANTIC
+    if use_semantic:
+        debug_print(logger, 'using RelationAugmenter')
+        vg_stats = VGStats()
+        fg_matrix = vg_stats.fg_matrix
+        pred_counts = fg_matrix.sum((0,1))
+        strategy = cfg.SOLVER.AUGMENTATION.STRATEGY
+        bottom_k = cfg.SOLVER.AUGMENTATION.BOTTOM_K
+        alpha = cfg.SOLVER.AUGMENTATION.ALPHA
+        max_batchsize_aug = cfg.SOLVER.AUGMENTATION.MAX_BATCHSIZE_AUG
+        relation_augmenter = RelationAugmenter(pred_counts, bottom_k, strategy, alpha, max_batchsize_aug, cfg=cfg) # TODO: read strategy from scripts
+        debug_print(logger, 'end RelationAugmenter')
 
     print_first_grad = True
     for iteration, (images, targets, _) in enumerate(train_data_loader, start_iter):
