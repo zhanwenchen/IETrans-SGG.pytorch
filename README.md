@@ -27,7 +27,7 @@ Our paper get (1, 1, 2) from reviewers which is near to full marks (1, 1, 1).
 ## Overview
 ![alt text](demo/teaser.png "Illustration of IETrans")
 
-Internal Transfer: transfer data from general predicate categories (e.g. _on_) to informative ones (e.g. _riding on_).  
+Internal Transfer: transfer data from general predicate categories (e.g. _on_) to informative ones (e.g. _riding on_).
 External Transfer: relabel unannoated data.
 
 ## Install
@@ -56,8 +56,8 @@ In this work, we do not modify the Faster R-CNN part. The training process can b
 All commands of training are saved in the directory `cmds/`. The directory of `cmds` looks like:
 
 ```python
-cmds/  
-├── 50 
+cmds/
+├── 50
 │   └── motif
 │       ├── predcls
 │       │   ├── lt \\ training to cope with long-tail distribution
@@ -204,3 +204,4 @@ If you find this work helpful, please kindly consider citing our paper in your w
 The code is built on [Scene-Graph-Benchmark.pytorch](https://github.com/KaihuaTang/Scene-Graph-Benchmark.pytorch), [VisualDS](https://github.com/thunlp/VisualDS), and [BGNN](https://github.com/SHTUPLUS/PySGG)
 Thanks for their excellent codes.
 
+2024-02-15 14:34:07,227 maskrcnn_benchmark.utils.miscellaneous WARNING: Dataset [ConcatDataset] has no categories attribute, labels.json file won't be created

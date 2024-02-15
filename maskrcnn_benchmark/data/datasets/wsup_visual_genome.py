@@ -1,30 +1,26 @@
 import os
-import sys
-import torch
-import h5py
+from itertools import product
+import random
 import json
+import h5py
+import torch
 from PIL import Image
 import numpy as np
-from collections import defaultdict
-from tqdm import tqdm
-import random
-
-from itertools import product
 from maskrcnn_benchmark.structures.bounding_box import BoxList
 from maskrcnn_benchmark.structures.boxlist_ops import boxlist_iou
-from .visual_genome import load_info, load_image_filenames, correct_img_info, get_VG_statistics
-import pickle
+from maskrcnn_benchmark.data.datasets.visual_genome import load_info, load_image_filenames, get_VG_statistics
+
 BOX_SCALE = 1024  # Scale at which we have the boxes
 
 
-class ExTransDataset(torch.utils.data.Dataset):
+class WVGDataset(torch.utils.data.Dataset):
 
-    def __init__(self, split, img_dir, roidb_file, dict_file, image_file, transforms=None,
+    def __init__(self, split, img_dir, roidb_file, dict_file, image_file, use_graft=None, transforms=None,
                  filter_empty_rels=True, num_im=-1, num_val_im=5000,
                  filter_duplicate_rels=True, filter_non_overlap=True, flip_aug=False, custom_eval=False,
-                 custom_path='', distant_supervsion_file=None, specified_data_file=None, custom_bbox_path=''):
+                 custom_path='', distant_supervsion_file=None, custom_bbox_path='', with_clean_classifier=None):
         """
-        The dataset to conduct external transfer
+        Torch dataset for VisualGenome
         Parameters:
             split: Must be train, test, or val
             img_dir: folder containing all vg images
@@ -37,12 +33,12 @@ class ExTransDataset(torch.utils.data.Dataset):
             num_im: Number of images in the entire dataset. -1 for all images.
             num_val_im: Number of images in the validation set (must be less than num_im
                unless num_im is -1.)
-            specified_data_file: pickle file constains training data
         """
         # for debug
         # num_im = 10000
         # num_val_im = 4
-        assert split in {'train'}
+
+        assert split in {'train', 'val', 'test'}
         assert flip_aug is False
         self.flip_aug = flip_aug
         self.split = split
@@ -73,39 +69,38 @@ class ExTransDataset(torch.utils.data.Dataset):
                 dskb=self.distant_supervision_bank
             )
             self.relationships = None
+            print(len(self.gt_boxes))
             self.filenames, self.img_info = load_image_filenames(img_dir, image_file)  # length equals to split_mask
             self.filenames = [self.filenames[i] for i in np.where(self.split_mask)[0]]
             self.img_info = [self.img_info[i] for i in np.where(self.split_mask)[0]]
-        self.data = pickle.load(open(specified_data_file, "rb"))
-
-        # check
-        assert len(self.data) == len(self.img_info), "{}, {}".format(len(self.data), len(self.img_info))
-        mask = [k is not None for k in self.data]
-        self.data = [d for m, d in zip(mask, self.data) if m]
-        self.img_info = [d for m, d in zip(mask, self.img_info) if m]
-        self.filenames = [d for m, d in zip(mask, self.filenames) if m]
-        self.gt_attributes = [d for m, d in zip(mask, self.gt_attributes) if m]
-        for a, b in zip(self.data, self.filenames):
-            assert a['img_path'] == b
-
 
     def __getitem__(self, index):
+        # if self.split == 'train':
+        #    while(random.random() > self.img_info[index]['anti_prop']):
+        #        index = int(random.random() * len(self.filenames))
+        if self.custom_eval:
+            img = Image.open(self.custom_files[index]).convert("RGB")
+            target = torch.LongTensor([-1])
+            if self.transforms is not None:
+                img, target = self.transforms(img, target)
+            return img, target, index
+
         img = Image.open(self.filenames[index]).convert("RGB")
-        target = self.get_groundtruth(index)
+        if img.size[0] != self.img_info[index]['width'] or img.size[1] != self.img_info[index]['height']:
+            print('=' * 20, ' ERROR index ', str(index), ' ', str(img.size), ' ', str(self.img_info[index]['width']),
+                  ' ', str(self.img_info[index]['height']), ' ', '=' * 20)
+
+        flip_img = (random.random() > 0.5) and self.flip_aug and (self.split == 'train')
+
+        target = self.get_groundtruth(index, flip_img=flip_img)
+
+        if flip_img:
+            img = img.transpose(method=Image.FLIP_LEFT_RIGHT)
+
         if self.transforms is not None:
             img, target = self.transforms(img, target)
-        target.add_field("cur_data", self.data[index])
-        return img, target, index
 
-    # def get_statistics(self):
-    #     result = {
-    #         'fg_matrix': None,
-    #         'pred_dist': None,
-    #         'obj_classes': self.ind_to_classes,
-    #         'rel_classes': self.ind_to_predicates,
-    #         'att_classes': self.ind_to_attributes,
-    #     }
-    #     return result
+        return img, target, index
 
     def get_statistics(self, no_matrix=False):
         if no_matrix:
@@ -150,31 +145,64 @@ class ExTransDataset(torch.utils.data.Dataset):
         return self.img_info[index]
 
     def get_groundtruth(self, index, flip_img=False):
-        cur_data = self.data[index]
-
+        # skip 28931
+        # if index == 28931:
+        #     index = 28932
+        # print(self.gt_classes[index])
         img_info = self.get_img_info(index)
         w, h = img_info['width'], img_info['height']
-
-        box = torch.from_numpy(cur_data['boxes']).reshape(-1, 4)  # guard against no boxes
+        # important: recover original box from BOX_SCALE
+        box = self.gt_boxes[index] / BOX_SCALE * max(w, h)
+        box = torch.from_numpy(box).reshape(-1, 4)  # guard against no boxes
+        if flip_img:
+            new_xmin = w - box[:, 2]
+            new_xmax = w - box[:, 0]
+            box[:, 0] = new_xmin
+            box[:, 2] = new_xmax
         target = BoxList(box, (w, h), 'xyxy')  # xyxy
-        target.add_field("labels", torch.from_numpy(cur_data['labels']))
-        target.add_field("attributes", torch.from_numpy(self.gt_attributes[index])[:len(box)])
-        target.add_field("relation_pair_idxs", torch.from_numpy(cur_data['pairs']))
 
-        # relation_map_tensor = torch.zeros((len(cur_data['pairs']), self.num_rel_classes), dtype=torch.float32)
-        # relation_soft_labels = torch.zeros((len(cur_data['pairs']), self.num_rel_classes), dtype=torch.float32)
-        # rel_logits = cur_data['rel_logits']
-        # possible_rels = cur_data['possible_rels']
-        # for i, (logit, ds_rels) in enumerate(zip(rel_logits, possible_rels)):
-        #     if logit is None:
-        #         logit = torch.tensor([1.])
-        #     else:
-        #         logit = (torch.from_numpy(logit).float().squeeze(0)).softmax(0)
-        #     relation_soft_labels[i, ds_rels] = logit
-        #     relation_map_tensor[i, ds_rels] = 1.
-        # target.add_field("relation_labels", relation_map_tensor)
-        # target.add_field("relation_soft_labels", relation_soft_labels)
-        # target.add_field("relation_labels", relation_soft_labels)
+        target.add_field("labels", torch.from_numpy(self.gt_classes[index]))
+        target.add_field("attributes", torch.from_numpy(self.gt_attributes[index]))
+        # assert n > 1
+        target = target.clip_to_image(remove_empty=True)
+
+        # assert n > 1
+        # Add relation to target
+        # filter candidate relation pair idxs
+        bbox_gt_classes = target.get_field("labels").numpy()
+        # if len(bbox_gt_classes) != len(self.gt_classes[index]):
+        #     print(index)
+        iou_table = boxlist_iou(target, target)
+        relation_pair_idxs = [(subj, obj) for subj, obj in product(range(len(bbox_gt_classes)), repeat=2)
+                    if subj!=obj and iou_table[subj, obj] > 0] # choose not self and overlapping relation pairs
+
+        obj_pair2ds_key = lambda subj_idx, obj_idx: str(bbox_gt_classes[subj_idx])+'_'+str(bbox_gt_classes[obj_idx])
+        get_ds_rel_candidates = lambda subj_idx, obj_idx: self.distant_supervision_bank.get(obj_pair2ds_key(subj_idx, obj_idx), None)
+        # relation_map: [[1,2,3,4,5], [4,5], [c1, c2, c3,...cn]] -> List
+        # [c1, ...cn] is all the possible relations between subj and obj
+        relation_map = [get_ds_rel_candidates(subj_obj[0], subj_obj[1]) for subj_obj in relation_pair_idxs]
+
+        # filter non-empty relation pairs
+        filtered_idxs = [i for i in range(len(relation_map)) if relation_map[i] is not None]
+        list_slice = lambda l, idxs: [l[i] for i in idxs]
+        relation_pair_idxs = list_slice(relation_pair_idxs, filtered_idxs)
+        relation_map = list_slice(relation_map, filtered_idxs)
+        if len(relation_pair_idxs)==0:
+            relation_pair_idxs = [[0, 0]]
+            relation_map = [[0]]
+        # add relation matrix
+        relation_pair_idxs = torch.tensor(relation_pair_idxs, dtype=torch.int64)
+        target.add_field("relation_pair_idxs", relation_pair_idxs)
+        # turn relation map to indexs
+        relation_labels_idxs = [(i, cand) for i, candidates in enumerate(relation_map) for cand in candidates]
+        x_relation_labels_idxs = torch.tensor([x for x, y in relation_labels_idxs], dtype=torch.int64)
+        y_relation_labels_idxs = torch.tensor([y for x, y in relation_labels_idxs], dtype=torch.int64)
+
+        # construct relation_map to tensor
+        relation_map_tensor = torch.zeros((len(relation_pair_idxs), self.num_rel_classes), dtype=torch.float32)
+        relation_map_tensor[x_relation_labels_idxs, y_relation_labels_idxs] = 1
+        target.add_field("relation_labels", relation_map_tensor)
+
         return target
 
     def __len__(self):
@@ -287,3 +315,4 @@ def load_graphs(roidb_file, split, num_im, num_val_im, filter_empty_rels, filter
         # relationships.append(rels)
 
     return split_mask, boxes, gt_classes, gt_attributes, None
+

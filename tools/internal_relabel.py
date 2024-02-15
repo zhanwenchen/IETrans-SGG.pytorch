@@ -15,9 +15,8 @@ import torch
 import torch.distributed as dist
 import numpy as np
 from maskrcnn_benchmark.config import cfg
-from maskrcnn_benchmark.data import make_data_loader
-from maskrcnn_benchmark.solver import make_lr_scheduler
-from maskrcnn_benchmark.solver import make_optimizer
+from maskrcnn_benchmark.data import make_data_loader, VGStats
+from maskrcnn_benchmark.solver import make_lr_scheduler, make_optimizer
 from maskrcnn_benchmark.modeling.detector import build_detection_model
 from maskrcnn_benchmark.utils.checkpoint import DetectronCheckpointer
 from maskrcnn_benchmark.utils.collect_env import collect_env_info
@@ -34,6 +33,24 @@ except ImportError:
 
 def train(cfg, local_rank, distributed, logger):
     debug_print(logger, 'prepare training')
+    arguments = {}
+    arguments["iteration"] = 0
+    train_data_loader = make_data_loader(
+        cfg,
+        mode='train',
+        is_distributed=distributed,
+        start_iter=arguments["iteration"],
+    )
+    debug_print(logger, 'end dataloader')
+    statistics = train_data_loader.dataset.get_statistics()
+    vg_stats = VGStats(
+        statistics['fg_matrix'],
+        statistics['pred_dist'],
+        statistics['obj_classes'],
+        statistics['rel_classes'],
+        statistics['att_classes'],
+        statistics['stats'], # None
+    )
     model = build_detection_model(cfg)
     debug_print(logger, 'end model construction')
 
@@ -97,13 +114,6 @@ def train(cfg, local_rank, distributed, logger):
         # load_mapping is only used when we init current model from detection model.
         checkpointer.load(cfg.MODEL.PRETRAINED_DETECTOR_CKPT, with_optim=False, load_mapping=load_mapping)
     debug_print(logger, 'end load checkpointer')
-    train_data_loader = make_data_loader(
-        cfg,
-        mode='train',
-        is_distributed=distributed,
-        start_iter=arguments["iteration"],
-    )
-    debug_print(logger, 'end dataloader')
 
     logger.info("Start training")
     dic = {}

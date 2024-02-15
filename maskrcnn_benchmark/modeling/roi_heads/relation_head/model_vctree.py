@@ -1,17 +1,16 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
-from maskrcnn_benchmark.modeling import registry
-import numpy as np
 import torch
 from torch import nn
+from torch.nn import Module
 from torch.nn import functional as F
 from maskrcnn_benchmark.modeling.utils import cat
-from .utils_motifs import obj_edge_vectors, center_x, sort_by_score, to_onehot, get_dropout_mask, nms_overlaps, encode_box_info
+from .utils_motifs import obj_edge_vectors, to_onehot, get_dropout_mask, encode_box_info
 from .utils_vctree import generate_forest, arbForest_to_biForest, get_overlap_info
 from .utils_treelstm import TreeLSTM_IO, MultiLayer_BTreeLSTM, BiTreeLSTM_Backward, BiTreeLSTM_Foreward
 from .utils_relation import layer_init
 
 
-class DecoderTreeLSTM(torch.nn.Module):
+class DecoderTreeLSTM(Module):
     def __init__(self, cfg, classes, embed_dim, inputs_dim, hidden_dim, direction='backward', dropout=0.2):
         super(DecoderTreeLSTM, self).__init__()
         """
@@ -61,19 +60,19 @@ class DecoderTreeLSTM(torch.nn.Module):
 
         self.decoderLSTM(tree, features, lstm_io)
 
-        out_h = lstm_io.hidden[lstm_io.order.long()]
+        # out_h = lstm_io.hidden[lstm_io.order.long()]
         out_dists = lstm_io.dists[lstm_io.order.long()]
         out_commitments = lstm_io.commitments[lstm_io.order.long()]
-            
+
         return out_dists, out_commitments
 
 
-class VCTreeLSTMContext(nn.Module):
+class VCTreeLSTMContext(Module):
     """
     Modified from neural-motifs to encode contexts for each objects
     """
-    def __init__(self, config, obj_classes, rel_classes, statistics, in_channels):
-        super(VCTreeLSTMContext, self).__init__()
+    def __init__(self, config, obj_classes, rel_classes, pred_dist, in_channels):
+        super().__init__()
         self.cfg = config
         self.obj_classes = obj_classes
         self.rel_classes = rel_classes
@@ -107,7 +106,7 @@ class VCTreeLSTMContext(nn.Module):
         self.overlap_embed = nn.Sequential(*[
             nn.Linear(6, 128), nn.BatchNorm1d(128, momentum= 0.001), nn.ReLU(inplace=True),
             ])
-        
+
         # box embed
         self.box_embed = nn.Sequential(*[
             nn.Linear(9, 128), nn.BatchNorm1d(128, momentum= 0.001), nn.ReLU(inplace=True),
@@ -122,7 +121,7 @@ class VCTreeLSTMContext(nn.Module):
         assert self.nl_obj > 0 and self.nl_edge > 0
 
         # VCTree
-        co_occour = statistics['pred_dist'].float().sum(-1)
+        co_occour = pred_dist.float().sum(-1)
         assert co_occour.shape[0] == co_occour.shape[-1]
         assert len(co_occour.shape) == 2
         self.bi_freq_prior = nn.Linear(self.num_obj_classes*self.num_obj_classes, 1, bias=False)
@@ -137,7 +136,7 @@ class VCTreeLSTMContext(nn.Module):
         self.score_sub = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.score_obj = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.vision_prior = nn.Linear(self.hidden_dim * 3 + 1, 1)
-        
+
         layer_init(self.obj_reduce, xavier=True)
         layer_init(self.emb_reduce, xavier=True)
         layer_init(self.score_pre, xavier=True)
@@ -158,7 +157,7 @@ class VCTreeLSTMContext(nn.Module):
                 out_dim=self.hidden_dim,
                 num_layer=self.nl_edge,
                 dropout=self.dropout_rate if self.nl_edge > 1 else 0,)
-        
+
         # untreated average features
         self.average_ratio = 0.0005
         self.effect_analysis = config.MODEL.ROI_RELATION_HEAD.CAUSAL.EFFECT_ANALYSIS
@@ -181,7 +180,7 @@ class VCTreeLSTMContext(nn.Module):
         """
         obj_feats = obj_feats.split(num_objs, dim=0)
         obj_labels = obj_labels.split(num_objs, dim=0) if obj_labels is not None else None
-        
+
         obj_ctxs = []
         obj_preds = []
         obj_dists = []
@@ -216,7 +215,7 @@ class VCTreeLSTMContext(nn.Module):
         :return: edge_ctx: [num_obj, #feats] For later!
         """
         inp_feats = obj_feats.split(num_objs, dim=0)
-        
+
         edge_ctxs = []
         for feat, tree, num_obj in zip(inp_feats, forest, num_objs):
             edge_rep = self.edge_ctx_rnn(tree, feat, num_obj)
@@ -238,7 +237,7 @@ class VCTreeLSTMContext(nn.Module):
         else:
             obj_logits = cat([proposal.get_field("predict_logits") for proposal in proposals], dim=0).detach()
             obj_embed = F.softmax(obj_logits, dim=1) @ self.obj_embed1.weight
-        
+
         assert proposals[0].mode == 'xyxy'
         box_info = encode_box_info(proposals)
         pos_embed = self.pos_embed(box_info)
@@ -305,14 +304,14 @@ class VCTreeLSTMContext(nn.Module):
             sub_dist = dist.view(1, num_obj, -1).expand(num_obj, num_obj, -1).unsqueeze(2)
             obj_dist = dist.view(num_obj, 1, -1).expand(num_obj, num_obj, -1).unsqueeze(3)
             joint_dist = (sub_dist * obj_dist).view(num_obj, num_obj, -1)
-            
+
             co_prior = self.bi_freq_prior(joint_dist.view(num_obj*num_obj, -1)).view(num_obj, num_obj)
             vis_prior = self.vision_prior(cat([sub * obj, sub, obj, co_prior.unsqueeze(-1)], dim=-1).view(num_obj*num_obj, -1)).view(num_obj, num_obj)
             joint_pred =  torch.sigmoid(vis_prior) *  co_prior
 
             bi_preds.append(joint_pred)
             vc_scores.append(torch.sigmoid(joint_pred))
-        
+
         return bi_preds, vc_scores
 
 

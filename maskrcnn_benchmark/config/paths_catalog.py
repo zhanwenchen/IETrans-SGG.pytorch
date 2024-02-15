@@ -222,6 +222,13 @@ class DatasetCatalog(object):
             args['custom_eval'] = cfg.TEST.CUSTUM_EVAL
             args['custom_path'] = cfg.TEST.CUSTUM_PATH
             args['with_clean_classifier'] = cfg.MODEL.ROI_RELATION_HEAD.WITH_CLEAN_CLASSIFIER
+            if "DS" in name:
+                if cfg.WSUPERVISE.SPECIFIED_DATA_FILE is not None:
+                    args['specified_data_file'] = cfg.WSUPERVISE.SPECIFIED_DATA_FILE
+                return dict(
+                    factory=cfg.WSUPERVISE.DATASET,
+                    args=args,
+                )
             return dict(
                 factory="VGDataset",
                 args=args,

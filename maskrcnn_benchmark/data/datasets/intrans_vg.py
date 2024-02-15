@@ -1,31 +1,23 @@
 import os
-import sys
-import torch
-import h5py
-import json
-from PIL import Image
-import numpy as np
-from collections import defaultdict
-from tqdm import tqdm
-import random
-
-from itertools import product
-from maskrcnn_benchmark.structures.bounding_box import BoxList
-from maskrcnn_benchmark.structures.boxlist_ops import boxlist_iou
-from .visual_genome import load_info, load_image_filenames, correct_img_info, get_VG_statistics
 import pickle
 from collections import Counter
+from torch.utils.data import Dataset
+import torch
+from PIL import Image
+import numpy as np
+from maskrcnn_benchmark.structures.bounding_box import BoxList
 from maskrcnn_benchmark.config.defaults import _C as config
+from maskrcnn_benchmark.data.datasets.visual_genome import load_info, get_VG_statistics
 
 BOX_SCALE = 1024  # Scale at which we have the boxes
 
 
-class InTransDataset(torch.utils.data.Dataset):
+class InTransDataset(Dataset):
 
-    def __init__(self, split, img_dir, roidb_file, dict_file, image_file, transforms=None,
+    def __init__(self, split, img_dir, roidb_file, dict_file, image_file, use_graft=None, transforms=None,
                  filter_empty_rels=True, num_im=-1, num_val_im=5000,
                  filter_duplicate_rels=True, filter_non_overlap=True, flip_aug=False, custom_eval=False,
-                 custom_path='', distant_supervsion_file=None, specified_data_file=None, custom_bbox_path=''):
+                 custom_path='', distant_supervsion_file=None, specified_data_file=None, custom_bbox_path='', with_clean_classifier=None):
         """
             The dataset to conduct internal transfer
             or used for training a new model based on tranferred dataset
@@ -63,7 +55,8 @@ class InTransDataset(torch.utils.data.Dataset):
         self.categories = {i: self.ind_to_classes[i] for i in range(len(self.ind_to_classes))}
 
         self.custom_eval = custom_eval
-        self.data = pickle.load(open(specified_data_file, "rb"))
+        with open(specified_data_file, "rb") as file:
+            self.data = pickle.load(file)
         print(specified_data_file)
         self.img_info = [{"width":x["width"], "height": x["height"]} for x in self.data]
         self.filenames = [x["img_path"] for x in self.data]
@@ -71,6 +64,9 @@ class InTransDataset(torch.utils.data.Dataset):
         if self.rwt:
             # construct a reweighting dic
             self.reweighting_dic = self._get_reweighting_dic()
+
+
+        self.use_graft = use_graft
 
     def __getitem__(self, index):
         img = Image.open(self.data[index]["img_path"]).convert("RGB")
@@ -124,6 +120,8 @@ class InTransDataset(torch.utils.data.Dataset):
             'rel_classes': self.ind_to_predicates,
             'att_classes': self.ind_to_attributes,
         }
+        if not self.use_graft:
+            result['stats'] = None
         return result
 
     def get_custom_imgs(self, path):

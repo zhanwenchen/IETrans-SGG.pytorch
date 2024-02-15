@@ -1,23 +1,23 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
-from maskrcnn_benchmark.modeling import registry
 import numpy as np
 import torch
 from torch import nn
 from torch.nn.utils.rnn import PackedSequence
+from torch.nn import Module
 from torch.nn import functional as F
 from maskrcnn_benchmark.modeling.utils import cat
 from .utils_motifs import obj_edge_vectors, center_x, sort_by_score, to_onehot, get_dropout_mask, nms_overlaps, encode_box_info
 
 
-class FrequencyBias(nn.Module):
+class FrequencyBias(Module):
     """
     The goal of this is to provide a simplified way of computing
     P(predicate | obj1, obj2, img).
     """
 
-    def __init__(self, cfg, statistics, eps=1e-3):
-        super(FrequencyBias, self).__init__()
-        pred_dist = statistics['pred_dist'].float()
+    def __init__(self, cfg, pred_dist, eps=1e-3):
+        super().__init__()
+        pred_dist = pred_dist.float()
         assert pred_dist.size(0) == pred_dist.size(1)
 
         self.num_objs = pred_dist.size(0)
@@ -30,15 +30,15 @@ class FrequencyBias(nn.Module):
 
     def index_with_labels(self, labels):
         """
-        :param labels: [batch_size, 2] 
-        :return: 
+        :param labels: [batch_size, 2]
+        :return:
         """
         return self.obj_baseline(labels[:, 0] * self.num_objs + labels[:, 1])
 
     def index_with_probability(self, pair_prob):
         """
-        :param labels: [batch_size, num_obj, 2] 
-        :return: 
+        :param labels: [batch_size, num_obj, 2]
+        :return:
         """
         batch_size, num_obj, _ = pair_prob.shape
 
@@ -72,7 +72,7 @@ class DecoderRNN(nn.Module):
         self.input_linearity = torch.nn.Linear(self.input_size, 6 * self.hidden_size, bias=True)
         self.state_linearity = torch.nn.Linear(self.hidden_size, 5 * self.hidden_size, bias=True)
         self.out_obj = nn.Linear(self.hidden_size, len(self.obj_classes))
-        
+
         self.init_parameters()
 
     def init_parameters(self):
@@ -273,7 +273,7 @@ class LSTMContext(nn.Module):
         # map bidirectional hidden states of dimension self.hidden_dim*2 to self.hidden_dim
         self.lin_obj_h = nn.Linear(self.hidden_dim*2, self.hidden_dim)
         self.lin_edge_h = nn.Linear(self.hidden_dim*2, self.hidden_dim)
-        
+
         # untreated average features
         self.average_ratio = 0.0005
         self.effect_analysis = config.MODEL.ROI_RELATION_HEAD.CAUSAL.EFFECT_ANALYSIS
@@ -310,7 +310,7 @@ class LSTMContext(nn.Module):
 
         # untreated decoder input
         batch_size = encoder_rep.shape[0]
-        
+
         if (not self.training) and self.effect_analysis and ctx_average:
             decoder_inp = self.untreated_dcd_feat.view(1, -1).expand(batch_size, -1)
         else:
@@ -318,7 +318,7 @@ class LSTMContext(nn.Module):
 
         if self.training and self.effect_analysis:
             self.untreated_dcd_feat = self.moving_average(self.untreated_dcd_feat, decoder_inp)
-        
+
         # Decode in order
         if self.mode != 'predcls':
             decoder_inp = PackedSequence(decoder_inp, ls_transposed)
@@ -397,7 +397,7 @@ class LSTMContext(nn.Module):
             obj_rel_rep = cat((self.untreated_edg_feat.view(1, -1).expand(batch_size, -1), obj_ctx), dim=-1)
         else:
             obj_rel_rep = cat((obj_embed2, x, obj_ctx), -1)
-            
+
         edge_ctx = self.edge_ctx(obj_rel_rep, perm=perm, inv_perm=inv_perm, ls_transposed=ls_transposed)
 
         # memorize average feature

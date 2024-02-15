@@ -1,14 +1,13 @@
 import os
-import sys
-import torch
-import h5py
 import json
-from PIL import Image
-import numpy as np
 from collections import defaultdict
-from tqdm import tqdm
 import random
 import pickle
+import torch
+import h5py
+from PIL import Image
+import numpy as np
+from tqdm import tqdm
 from maskrcnn_benchmark.structures.bounding_box import BoxList
 from maskrcnn_benchmark.structures.boxlist_ops import boxlist_iou
 
@@ -16,7 +15,7 @@ BOX_SCALE = 1024  # Scale at which we have the boxes
 
 class VGDataset(torch.utils.data.Dataset):
 
-    def __init__(self, split, img_dir, roidb_file, dict_file, image_file, use_graft, transforms=None,
+    def __init__(self, split, img_dir, roidb_file, dict_file, image_file, use_graft=None, transforms=None,
                 filter_empty_rels=True, num_im=-1, num_val_im=5000,
                 filter_duplicate_rels=True, filter_non_overlap=True, flip_aug=False, custom_eval=False, custom_path='', with_clean_classifier=False, get_state=False):
         """

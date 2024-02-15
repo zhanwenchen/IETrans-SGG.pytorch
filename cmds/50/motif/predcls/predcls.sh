@@ -12,9 +12,9 @@ export DATASETS_DIR=${HOME}/datasets
 
 export PREDICTOR=MotifPredictor
 export CONFIG_FILE=configs/e2e_relation_X_101_32_8_FPN_1x_motif.yaml
-export USE_GRAFT=True
 export GRAFT_ALPHA=0.5
-export USE_SEMANTIC=True
+export USE_GRAFT=False
+export USE_SEMANTIC=False
 export STRATEGY='cooccurrence-pred_cov'
 export BOTTOM_K=30
 export NUM2AUG=4
@@ -33,7 +33,7 @@ else
     export BATCH_SIZE_PER_GPU=${MAX_BATCHSIZE_AUG}
 fi
 
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0
 
 export NUM_GPUS=$(echo ${CUDA_VISIBLE_DEVICES} | tr -cd , | wc -c); ((NUM_GPUS++))
 export BATCH_SIZE=$((${NUM_GPUS} * ${BATCH_SIZE_PER_GPU}))
@@ -41,14 +41,14 @@ export PORT=$(comm -23 <(seq 49152 65535 | sort) <(ss -Htan | awk '{print $4}' |
 # specify current directory as SG, e.g.:
 export SG=${HOME}/ietrans
 # specify experiment directory, e.g.:
-export EXP=${HOME}/experiments
+export EXP=${SG}/experiments
 export ALL_EDGES_FPATH=${DATASETS_DIR}/visual_genome/gbnet/all_edges.pkl
 
 
 # train a supervised model
-bash cmds/50/motif/predcls/sup/train.sh
+# bash cmds/50/motif/predcls/sup/train.sh
 # # conduct internal transfer
-# bash cmds/50/motif/predcls/lt/internal/relabel.sh
+bash cmds/50/motif/predcls/lt/internal/relabel.sh
 # # conduct external transfer
 # bash cmds/50/motif/predcls/lt/external/relabel.sh
 # # combine internal and external transferred data

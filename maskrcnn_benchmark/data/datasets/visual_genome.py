@@ -1,7 +1,6 @@
 import os
 from os import environ as os_environ
 from os.path import join as os_path_join
-import sys
 import torch
 from torch import (
     as_tensor as torch_as_tensor,
@@ -27,7 +26,7 @@ DICT_FILE_FPATH = os_path_join(VG_DIRPATH, 'VG-SGG-dicts-with-attri-info.json')
 
 class VGDataset(torch.utils.data.Dataset):
 
-    def __init__(self, split, img_dir, roidb_file, dict_file, image_file, use_graft, transforms=None,
+    def __init__(self, split, img_dir, roidb_file, dict_file, image_file, use_graft=False, transforms=None,
                 filter_empty_rels=True, num_im=-1, num_val_im=5000,
                 filter_duplicate_rels=True, filter_non_overlap=True, flip_aug=False, custom_eval=False, custom_path='', with_clean_classifier=False, get_state=False):
         """
@@ -541,3 +540,32 @@ def load_graphs(roidb_file, split, num_im, num_val_im, filter_empty_rels, filter
     print('sum all class number: ', count_list_np.sum())
     print('number images: ', split_mask.sum())
     return split_mask, boxes, gt_classes, gt_attributes, relationships
+
+
+
+def get_VG_statistics(img_dir, roidb_file, dict_file, image_file, must_overlap=True):
+    # return np.zeros((1,1,1)), np.zeros((1,1))
+    train_data = VGDataset(split='train', img_dir=img_dir, roidb_file=roidb_file,
+                        dict_file=dict_file, image_file=image_file, num_val_im=5000,
+                        filter_duplicate_rels=False)
+    num_obj_classes = len(train_data.ind_to_classes)
+    num_rel_classes = len(train_data.ind_to_predicates)
+    fg_matrix = np.zeros((num_obj_classes, num_obj_classes, num_rel_classes), dtype=np.int64)
+    bg_matrix = np.zeros((num_obj_classes, num_obj_classes), dtype=np.int64)
+
+    for ex_ind in tqdm(range(len(train_data))):
+        gt_classes = train_data.gt_classes[ex_ind].copy()
+        gt_relations = train_data.relationships[ex_ind].copy()
+        gt_boxes = train_data.gt_boxes[ex_ind].copy()
+
+        # For the foreground, we'll just look at everything
+        o1o2 = gt_classes[gt_relations[:, :2]]
+        for (o1, o2), gtr in zip(o1o2, gt_relations[:,2]):
+            fg_matrix[o1, o2, gtr] += 1
+        # For the background, get all of the things that overlap.
+        o1o2_total = gt_classes[np.array(
+            box_filter(gt_boxes, must_overlap=must_overlap), dtype=int)]
+        for (o1, o2) in o1o2_total:
+            bg_matrix[o1, o2] += 1
+
+    return fg_matrix, bg_matrix

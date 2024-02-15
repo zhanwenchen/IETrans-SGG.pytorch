@@ -199,7 +199,7 @@ def make_data_loader(cfg, mode='train', is_distributed=False, start_iter=0, data
         num_workers = cfg.DATALOADER.NUM_WORKERS
         data_loader = torch.utils.data.DataLoader(
             dataset,
-            num_workers=num_workers,
+            num_workers=0,
             batch_sampler=batch_sampler,
             collate_fn=collator,
         )
@@ -213,7 +213,7 @@ def make_data_loader(cfg, mode='train', is_distributed=False, start_iter=0, data
             if not os.path.exists(cfg.DETECTED_SGG_DIR):
                 os.makedirs(cfg.DETECTED_SGG_DIR)
 
-            with open(os.path.join(cfg.DETECTED_SGG_DIR, 'custom_data_info.json'), 'w') as outfile:  
+            with open(os.path.join(cfg.DETECTED_SGG_DIR, 'custom_data_info.json'), 'w') as outfile:
                 json.dump(custom_data_info, outfile)
             print('=====> ' + str(os.path.join(cfg.DETECTED_SGG_DIR, 'custom_data_info.json')) + ' SAVED !')
         data_loaders.append(data_loader)

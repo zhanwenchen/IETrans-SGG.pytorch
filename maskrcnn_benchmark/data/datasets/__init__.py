@@ -3,5 +3,8 @@ from .coco import COCODataset
 from .voc import PascalVOCDataset
 from .concat_dataset import ConcatDataset
 from .visual_genome import VGDataset
+from .wsup_visual_genome import WVGDataset
+from .intrans_vg import InTransDataset
+from .extrans_vg import ExTransDataset
 
-__all__ = ["COCODataset", "ConcatDataset", "PascalVOCDataset", "VGDataset"]
+__all__ = ["COCODataset", "ConcatDataset", "PascalVOCDataset", "VGDataset", "WVGDataset", "ExTransDataset", "InTransDataset",]
