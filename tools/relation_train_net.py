@@ -45,8 +45,7 @@ except ImportError:
 
 def train(cfg, local_rank, distributed, logger):
     debug_print(logger, 'prepare training')
-    model = build_detection_model(cfg)
-    debug_print(logger, 'end model construction')
+
 
     # modules that should be always set in eval mode
     # their eval() method should be called after model.train() is called
@@ -125,6 +124,19 @@ def train(cfg, local_rank, distributed, logger):
         is_distributed=distributed,
     )
     debug_print(logger, 'end dataloader')
+
+    if cfg.SOLVER.AUGMENTATION.USE_GRAFT is False:
+        statistics = train_data_loader.dataset.get_statistics()
+        vg_stats = VGStats(
+            statistics['fg_matrix'],
+            statistics['pred_dist'],
+            statistics['obj_classes'],
+            statistics['rel_classes'],
+            statistics['att_classes'],
+            statistics['stats'], # None
+        )
+    model = build_detection_model(cfg)
+    debug_print(logger, 'end model construction')
     checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
 
     if cfg.SOLVER.PRE_VAL:

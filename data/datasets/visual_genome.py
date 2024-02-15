@@ -69,6 +69,9 @@ class VGDataset(torch.utils.data.Dataset):
             self.filenames = [self.filenames[i] for i in np.where(self.split_mask)[0]]
             self.img_info = [self.img_info[i] for i in np.where(self.split_mask)[0]]
 
+        print(f'VGDataset: use_graft={use_graft}')
+        self.use_graft = use_graft
+
 
     def __getitem__(self, index):
         #if self.split == 'train':
