@@ -1,11 +1,6 @@
-import math
-
-import ipdb
 import torch
 from torch import nn
 from torch.nn import functional as F
-
-from maskrcnn_benchmark.config import cfg
 from maskrcnn_benchmark.structures.boxlist_ops import squeeze_tensor
 
 
@@ -62,7 +57,7 @@ class FocalLossFGBGNormalization(nn.Module):
 
     def forward(self, inputs, targets, reduce=True):
         loss = self.focal_loss(inputs, targets)
-        
+
         loss = loss.sum(-1)
         loss /= (len(torch.nonzero(targets)) + 1)
 

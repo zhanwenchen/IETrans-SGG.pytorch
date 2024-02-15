@@ -28,9 +28,9 @@ class GGNNObj(nn.Module):
         self.output_dim = output_dim
 
         if use_prior_prob_knowledge:
-            matrix_np = np.load(prior_matrix).astype(np.float32)
+            matrix_np = np.load(prior_matrix).astype(float32)
         else:
-            matrix_np = np.ones((num_obj_cls, num_obj_cls)).astype(np.float32) / num_obj_cls
+            matrix_np = np.ones((num_obj_cls, num_obj_cls)).astype(float32) / num_obj_cls
 
         # didn't finetuned during the training
         self.matrix = nn.Parameter(torch.from_numpy(matrix_np), requires_grad=False)
@@ -95,7 +95,7 @@ class GGNNRel(nn.Module):
         super(GGNNRel, self).__init__()
         self.num_rel_cls = num_rel_cls
         self.time_step_num = time_step_num
-        self.matrix = np.load(prior_matrix).astype(np.float32)
+        self.matrix = np.load(prior_matrix).astype(float32)
         self.use_knowledge = use_knowledge
         self.avg_graph_sum = cfg.MODEL.ROI_RELATION_HEAD.KERN_MODULE.AVERAGE_GRAPH_SUMMARY
 
@@ -115,7 +115,7 @@ class GGNNRel(nn.Module):
 
         (input_rel_num, node_num, _) = input_ggnn.size()
         assert input_rel_num == len(rel_inds)
-        batch_in_matrix_sub = np.zeros((input_rel_num, 2, self.num_rel_cls), dtype=np.float32)
+        batch_in_matrix_sub = np.zeros((input_rel_num, 2, self.num_rel_cls), dtype=float32)
 
         if self.use_knowledge:  # construct adjacency matrix depending on the predicted labels of subject and object.
             for index, rel in enumerate(rel_inds):

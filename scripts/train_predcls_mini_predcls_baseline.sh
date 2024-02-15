@@ -18,7 +18,7 @@ else
   export PREDICTOR=MotifPredictor
   export CONFIG_FILE=configs/e2e_relation_X_101_32_8_FPN_1x_motif.yaml
   export USE_GRAFT=True
-  export USE_SEMANTIC=False
+  export USE_SEMANTIC=True
   export STRATEGY='cooccurrence-pred_cov'
   export BOTTOM_K=30
   export NUM2AUG=4

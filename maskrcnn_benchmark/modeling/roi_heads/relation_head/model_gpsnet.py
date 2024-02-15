@@ -4,7 +4,6 @@ import copy
 import torch
 import torch.nn as nn
 
-from maskrcnn_benchmark.data import get_dataset_statistics
 from maskrcnn_benchmark.modeling.make_layers import make_fc
 from maskrcnn_benchmark.modeling.roi_heads.relation_head.model_motifs import FrequencyBias
 from maskrcnn_benchmark.modeling.roi_heads.relation_head.model_msg_passing_gps import PairwiseFeatureExtractor
@@ -20,7 +19,7 @@ class GatingModel(nn.Module):
         self.union_input_dim = union_input_dim
         self.hidden_dim = hidden_dim
 
-        
+
 
         self.ws = nn.Sequential(
             # nn.BatchNorm1d(self.entity_input_dim),

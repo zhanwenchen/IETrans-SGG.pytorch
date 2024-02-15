@@ -3,7 +3,6 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from maskrcnn_benchmark.data import get_dataset_statistics
 from maskrcnn_benchmark.modeling.make_layers import make_fc
 from maskrcnn_benchmark.modeling.roi_heads.relation_head.utils_relation import get_box_pair_info, get_box_info, \
     layer_init

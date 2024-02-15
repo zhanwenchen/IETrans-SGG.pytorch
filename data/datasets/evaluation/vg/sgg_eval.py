@@ -8,7 +8,6 @@ from functools import reduce
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
-from maskrcnn_benchmark.data import get_dataset_statistics
 from maskrcnn_benchmark.structures.bounding_box import BoxList
 from maskrcnn_benchmark.structures.boxlist_ops import boxlist_iou
 from maskrcnn_benchmark.utils.miscellaneous import intersect_2d, argsort_desc, bbox_overlaps
@@ -19,12 +18,12 @@ class SceneGraphEvaluation(ABC):
     def __init__(self, result_dict):
         super().__init__()
         self.result_dict = result_dict
- 
+
     @abstractmethod
     def register_container(self, mode):
         print("Register Result Container")
         pass
-    
+
     @abstractmethod
     def generate_print_string(self, mode):
         print("Generate Print String")
@@ -38,7 +37,7 @@ https://github.com/rowanz/neural-motifs
 class SGRecall(SceneGraphEvaluation):
     def __init__(self, result_dict):
         super(SGRecall, self).__init__(result_dict)
-        
+
 
     def register_container(self, mode):
         self.result_dict[mode + '_recall'] = {20: [], 50: [], 100: []}
@@ -160,7 +159,7 @@ class SGZeroShotRecall(SceneGraphEvaluation):
         super(SGZeroShotRecall, self).__init__(result_dict)
 
     def register_container(self, mode):
-        self.result_dict[mode + '_zeroshot_recall'] = {20: [], 50: [], 100: []} 
+        self.result_dict[mode + '_zeroshot_recall'] = {20: [], 50: [], 100: []}
 
     def generate_print_string(self, mode):
         result_str = 'SGG eval: '
@@ -202,9 +201,9 @@ No Graph Constraint Mean Recall
 class SGNGZeroShotRecall(SceneGraphEvaluation):
     def __init__(self, result_dict):
         super(SGNGZeroShotRecall, self).__init__(result_dict)
-    
+
     def register_container(self, mode):
-        self.result_dict[mode + '_ng_zeroshot_recall'] = {20: [], 50: [], 100: []} 
+        self.result_dict[mode + '_ng_zeroshot_recall'] = {20: [], 50: [], 100: []}
 
     def generate_print_string(self, mode):
         result_str = 'SGG eval: '
@@ -274,7 +273,7 @@ class SGPairAccuracy(SceneGraphEvaluation):
 
         for k in self.result_dict[mode + '_accuracy_hit']:
             # to calculate accuracy, only consider those gt pairs
-            # This metric is used by "Graphical Contrastive Losses for Scene Graph Parsing" 
+            # This metric is used by "Graphical Contrastive Losses for Scene Graph Parsing"
             # for sgcls and predcls
             if mode != 'sgdet':
                 gt_pair_pred_to_gt = []
@@ -342,11 +341,11 @@ class SGMeanRecall(SceneGraphEvaluation):
                 local_label = gt_rels[int(match[idx]),2]
                 recall_hit[int(local_label)] += 1
                 recall_hit[0] += 1
-            
+
             for n in range(self.num_rel):
                 if recall_count[n] > 0:
                     self.result_dict[mode + '_mean_recall_collect'][k][n].append(float(recall_hit[n] / recall_count[n]))
- 
+
 
     def calculate_mean_recall(self, mode):
         for k, v in self.result_dict[mode + '_mean_recall'].items():
@@ -414,11 +413,11 @@ class SGNGMeanRecall(SceneGraphEvaluation):
                 local_label = gt_rels[int(match[idx]),2]
                 recall_hit[int(local_label)] += 1
                 recall_hit[0] += 1
-            
+
             for n in range(self.num_rel):
                 if recall_count[n] > 0:
                     self.result_dict[mode + '_ng_mean_recall_collect'][k][n].append(float(recall_hit[n] / recall_count[n]))
- 
+
 
     def calculate_mean_recall(self, mode):
         for k, v in self.result_dict[mode + '_ng_mean_recall'].items():
@@ -458,7 +457,7 @@ class SGAccumulateRecall(SceneGraphEvaluation):
         for k, v in self.result_dict[mode + '_accumulate_recall'].items():
             self.result_dict[mode + '_accumulate_recall'][k] = float(self.result_dict[mode + '_recall_hit'][k][0]) / float(self.result_dict[mode + '_recall_count'][k][0] + 1e-10)
 
-        return 
+        return
 
 
 def _triplet(relations, classes, boxes, predicate_scores=None, class_scores=None):
@@ -470,7 +469,7 @@ def _triplet(relations, classes, boxes, predicate_scores=None, class_scores=None
         boxes (#objs, 4)
         predicate_scores (#rel, ) : scores for each predicate
         class_scores (#objs, ) : scores for each object
-    Returns: 
+    Returns:
         triplets (#rel, 3) : (sub_label, pred_label, ob_label)
         triplets_boxes (#rel, 8) array of boxes for the parts
         triplets_scores (#rel, 3) : (sub_score, pred_score, ob_score)

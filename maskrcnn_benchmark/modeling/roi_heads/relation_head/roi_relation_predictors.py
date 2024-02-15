@@ -1,6 +1,4 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
-import os
-import numpy as np
 import torch
 from maskrcnn_benchmark.modeling import registry
 from torch import nn
@@ -8,7 +6,6 @@ from torch.nn import functional as F
 
 from maskrcnn_benchmark.layers import smooth_l1_loss, kl_div_loss, entropy_loss, Label_Smoothing_Regression
 from maskrcnn_benchmark.modeling.utils import cat
-from .model_union import UnionPair, KBBias
 from .model_msg_passing import IMPContext
 from .model_vtranse import VTransEFeature
 from .model_vctree import VCTreeLSTMContext
@@ -16,7 +13,7 @@ from .model_motifs import LSTMContext, FrequencyBias
 from .model_motifs_with_attribute import AttributeLSTMContext
 from .model_transformer import TransformerContext
 from .utils_relation import layer_init, get_box_info, get_box_pair_info
-from maskrcnn_benchmark.data import get_dataset_statistics
+from maskrcnn_benchmark.data import VGStats
 from maskrcnn_benchmark.modeling.roi_heads.relation_head.model_gpsnet import GPSNetContext
 from .utils_relation import layer_init, get_box_info, get_box_pair_info, obj_prediction_nms
 from maskrcnn_benchmark.modeling.roi_heads.relation_head.classifier import build_classifier
@@ -30,7 +27,6 @@ from maskrcnn_benchmark.modeling.roi_heads.relation_head.model_kern import (
     to_onehot,
 )
 from maskrcnn_benchmark.config import cfg
-from maskrcnn_benchmark.structures.boxlist_ops import squeeze_tensor
 
 
 @registry.ROI_RELATION_PREDICTOR.register("TransformerPredictor")
@@ -42,9 +38,8 @@ class TransformerPredictor(nn.Module):
         self.num_obj_cls = config.MODEL.ROI_BOX_HEAD.NUM_CLASSES
         self.num_att_cls = config.MODEL.ROI_ATTRIBUTE_HEAD.NUM_ATTRIBUTES
         self.num_rel_cls = config.MODEL.ROI_RELATION_HEAD.NUM_CLASSES
-        
+
         assert in_channels is not None
-        num_inputs = in_channels
         self.use_vision = config.MODEL.ROI_RELATION_HEAD.PREDICT_USE_VISION
         # train_use_bias is to use bias in the training
         self.train_use_bias = config.MODEL.ROI_RELATION_HEAD.TRAIN_USE_BIAS
@@ -52,8 +47,8 @@ class TransformerPredictor(nn.Module):
         self.predict_use_bias = config.MODEL.ROI_RELATION_HEAD.PREDICT_USE_BIAS
 
         # load class dict
-        statistics = get_dataset_statistics(config)
-        obj_classes, rel_classes, att_classes = statistics['obj_classes'], statistics['rel_classes'], statistics['att_classes']
+        vg_stats = VGStats()
+        obj_classes, rel_classes, att_classes = vg_stats.obj_classes, vg_stats.rel_classes, vg_stats.att_classes
         assert self.num_obj_cls==len(obj_classes)
         assert self.num_att_cls==len(att_classes)
         assert self.num_rel_cls==len(rel_classes)
@@ -68,12 +63,12 @@ class TransformerPredictor(nn.Module):
         self.rel_compress = nn.Linear(self.pooling_dim, self.num_rel_cls)
         self.ctx_compress = nn.Linear(self.hidden_dim * 2, self.num_rel_cls)
 
-        # initialize layer parameters 
+        # initialize layer parameters
         layer_init(self.post_emb, 10.0 * (1.0 / self.hidden_dim) ** 0.5, normal=True)
         layer_init(self.rel_compress, xavier=True)
         layer_init(self.ctx_compress, xavier=True)
         layer_init(self.post_cat, xavier=True)
-        
+
         if self.pooling_dim != config.MODEL.ROI_BOX_HEAD.MLP_HEAD_DIM:
             self.union_single_not_match = True
             self.up_dim = nn.Linear(config.MODEL.ROI_BOX_HEAD.MLP_HEAD_DIM, self.pooling_dim)
@@ -81,7 +76,7 @@ class TransformerPredictor(nn.Module):
         else:
             self.union_single_not_match = False
 
-        self.freq_bias = FrequencyBias(config, statistics)
+        self.freq_bias = FrequencyBias(config, vg_stats.pred_dist)
 
     def forward(self, proposals, rel_pair_idxs, rel_labels, rel_binarys, roi_features, union_features, logger=None):
         """
@@ -109,7 +104,7 @@ class TransformerPredictor(nn.Module):
         head_reps = head_rep.split(num_objs, dim=0)
         tail_reps = tail_rep.split(num_objs, dim=0)
         obj_preds = obj_preds.split(num_objs, dim=0)
-        
+
         # from object level feature to pairwise relation level feature
         prod_reps = []
         pair_preds = []
@@ -129,7 +124,7 @@ class TransformerPredictor(nn.Module):
                 visual_rep = ctx_gate * union_features
 
         rel_dists = self.rel_compress(visual_rep) + self.ctx_compress(prod_rep)
-                
+
         # use frequence bias
         if (self.train_use_bias and self.training) or (self.predict_use_bias and not self.training):
             rel_dists = rel_dists + self.freq_bias.index_with_labels(pair_pred)
@@ -161,7 +156,7 @@ class IMPPredictor(nn.Module):
         # post decoding
         self.hidden_dim = config.MODEL.ROI_RELATION_HEAD.CONTEXT_HIDDEN_DIM
         self.pooling_dim = config.MODEL.ROI_RELATION_HEAD.CONTEXT_POOLING_DIM
-        
+
         if self.pooling_dim != config.MODEL.ROI_BOX_HEAD.MLP_HEAD_DIM:
             self.union_single_not_match = True
             self.up_dim = nn.Linear(config.MODEL.ROI_BOX_HEAD.MLP_HEAD_DIM, self.pooling_dim)
@@ -169,9 +164,10 @@ class IMPPredictor(nn.Module):
         else:
             self.union_single_not_match = False
 
-        # freq 
-        statistics = get_dataset_statistics(config)
-        self.freq_bias = FrequencyBias(config, statistics)
+        # freq
+        if self.use_bias:
+            vg_stats = VGStats()
+            self.freq_bias = FrequencyBias(config, vg_stats.pred_dist)
 
 
     def forward(self, proposals, rel_pair_idxs, rel_labels, rel_binarys, roi_features, union_features, logger=None):
@@ -223,17 +219,16 @@ class MotifPredictor(nn.Module):
         self.num_obj_cls = config.MODEL.ROI_BOX_HEAD.NUM_CLASSES
         self.num_att_cls = config.MODEL.ROI_ATTRIBUTE_HEAD.NUM_ATTRIBUTES
         self.num_rel_cls = config.MODEL.ROI_RELATION_HEAD.NUM_CLASSES
-        
+
         assert in_channels is not None
-        num_inputs = in_channels
         self.use_vision = config.MODEL.ROI_RELATION_HEAD.PREDICT_USE_VISION
         # train_use_bias is to use bias in the training
         self.train_use_bias = config.MODEL.ROI_RELATION_HEAD.TRAIN_USE_BIAS
         # predict_use_bias is to use bias in the inference
         self.predict_use_bias = config.MODEL.ROI_RELATION_HEAD.PREDICT_USE_BIAS
         # load class dict
-        statistics = get_dataset_statistics(config)
-        obj_classes, rel_classes, att_classes = statistics['obj_classes'], statistics['rel_classes'], statistics['att_classes']
+        vg_stats = VGStats()
+        obj_classes, rel_classes, att_classes = vg_stats.obj_classes, vg_stats.rel_classes, vg_stats.att_classes
         # assert self.num_obj_cls==len(obj_classes)
         # assert self.num_att_cls==len(att_classes), "{}, {}".format(self.num_att_cls, len(att_classes))
         # assert self.num_rel_cls==len(rel_classes)
@@ -250,11 +245,11 @@ class MotifPredictor(nn.Module):
         self.post_cat = nn.Linear(self.hidden_dim * 2, self.pooling_dim)
         self.rel_compress = nn.Linear(self.pooling_dim, self.num_rel_cls, bias=True)
 
-        # initialize layer parameters 
+        # initialize layer parameters
         layer_init(self.post_emb, 10.0 * (1.0 / self.hidden_dim) ** 0.5, normal=True)
         layer_init(self.post_cat, xavier=True)
         layer_init(self.rel_compress, xavier=True)
-        
+
         if self.pooling_dim != config.MODEL.ROI_BOX_HEAD.MLP_HEAD_DIM:
             self.union_single_not_match = True
             self.up_dim = nn.Linear(config.MODEL.ROI_BOX_HEAD.MLP_HEAD_DIM, self.pooling_dim)
@@ -266,7 +261,7 @@ class MotifPredictor(nn.Module):
         #     convey statistics into FrequencyBias to avoid loading again
             # self.freq_bias = FrequencyBias(config, statistics)
         if self.train_use_bias or self.predict_use_bias:
-            self.freq_bias = FrequencyBias(config, statistics)
+            self.freq_bias = FrequencyBias(config, vg_stats.pred_dist)
 
     def forward(self, proposals, rel_pair_idxs, rel_labels, rel_binarys, roi_features, union_features, logger=None):
         """
@@ -296,7 +291,7 @@ class MotifPredictor(nn.Module):
         head_reps = head_rep.split(num_objs, dim=0)
         tail_reps = tail_rep.split(num_objs, dim=0)
         obj_preds = obj_preds.split(num_objs, dim=0)
-        
+
         prod_reps = []
         pair_preds = []
         for pair_idx, head_rep, tail_rep, obj_pred in zip(rel_pair_idxs, head_reps, tail_reps, obj_preds):
@@ -382,8 +377,8 @@ class GPSNetPredictor(nn.Module):
 
         # freq
         # if self.use_bias:
-        statistics = get_dataset_statistics(config)
-        self.freq_bias = FrequencyBias(config, statistics)
+        vg_stats = VGStats()
+        self.freq_bias = FrequencyBias(config, vg_stats.pred_dist)
 
         self.init_classifier_weight()
 
@@ -492,22 +487,21 @@ class VCTreePredictor(nn.Module):
         self.num_obj_cls = config.MODEL.ROI_BOX_HEAD.NUM_CLASSES
         self.num_att_cls = config.MODEL.ROI_ATTRIBUTE_HEAD.NUM_ATTRIBUTES
         self.num_rel_cls = config.MODEL.ROI_RELATION_HEAD.NUM_CLASSES
-        
+
         assert in_channels is not None
-        num_inputs = in_channels
         # train_use_bias is to use bias in the training
         self.train_use_bias = config.MODEL.ROI_RELATION_HEAD.TRAIN_USE_BIAS
         # predict_use_bias is to use bias in the inference
         self.predict_use_bias = config.MODEL.ROI_RELATION_HEAD.PREDICT_USE_BIAS
 
         # load class dict
-        statistics = get_dataset_statistics(config)
-        obj_classes, rel_classes, att_classes = statistics['obj_classes'], statistics['rel_classes'], statistics['att_classes']
+        vg_stats = VGStats()
+        obj_classes, rel_classes, att_classes = vg_stats.obj_classes, vg_stats.rel_classes, vg_stats.att_classes
         assert self.num_obj_cls==len(obj_classes)
         assert self.num_att_cls==len(att_classes)
         assert self.num_rel_cls==len(rel_classes)
         # init contextual lstm encoding
-        self.context_layer = VCTreeLSTMContext(config, obj_classes, rel_classes, statistics, in_channels)
+        self.context_layer = VCTreeLSTMContext(config, obj_classes, rel_classes, vg_stats.pred_dist, in_channels)
 
         # post decoding
         self.hidden_dim = config.MODEL.ROI_RELATION_HEAD.CONTEXT_HIDDEN_DIM
@@ -525,10 +519,10 @@ class VCTreePredictor(nn.Module):
         layer_init(self.ctx_compress, xavier=True)
         #layer_init(self.uni_compress, xavier=True)
 
-        # initialize layer parameters 
+        # initialize layer parameters
         layer_init(self.post_emb, 10.0 * (1.0 / self.hidden_dim) ** 0.5, normal=True)
         layer_init(self.post_cat, xavier=True)
-        
+
         if self.pooling_dim != config.MODEL.ROI_BOX_HEAD.MLP_HEAD_DIM:
             self.union_single_not_match = True
             self.up_dim = nn.Linear(config.MODEL.ROI_BOX_HEAD.MLP_HEAD_DIM, self.pooling_dim)
@@ -538,7 +532,7 @@ class VCTreePredictor(nn.Module):
 
         # if self.use_bias:
             # convey statistics into FrequencyBias to avoid loading again
-        self.freq_bias = FrequencyBias(config, statistics)
+        self.freq_bias = FrequencyBias(config, vg_stats.pred_dist)
 
     def forward(self, proposals, rel_pair_idxs, rel_labels, rel_binarys, roi_features, union_features, logger=None):
         """
@@ -565,7 +559,7 @@ class VCTreePredictor(nn.Module):
         head_reps = head_rep.split(num_objs, dim=0)
         tail_reps = tail_rep.split(num_objs, dim=0)
         obj_preds = obj_preds.split(num_objs, dim=0)
-        
+
         prod_reps = []
         pair_preds = []
         for pair_idx, head_rep, tail_rep, obj_pred in zip(rel_pair_idxs, head_reps, tail_reps, obj_preds):
@@ -627,15 +621,15 @@ class CausalAnalysisPredictor(nn.Module):
         num_inputs = in_channels
 
         # load class dict
-        statistics = get_dataset_statistics(config)
-        obj_classes, rel_classes = statistics['obj_classes'], statistics['rel_classes']
+        vg_stats = VGStats()
+        obj_classes, rel_classes = vg_stats.obj_classes, vg_stats.rel_classes
         assert self.num_obj_cls==len(obj_classes)
         assert self.num_rel_cls==len(rel_classes)
         # init contextual lstm encoding
         if config.MODEL.ROI_RELATION_HEAD.CAUSAL.CONTEXT_LAYER == "motifs":
             self.context_layer = LSTMContext(config, obj_classes, rel_classes, in_channels)
         elif config.MODEL.ROI_RELATION_HEAD.CAUSAL.CONTEXT_LAYER == "vctree":
-            self.context_layer = VCTreeLSTMContext(config, obj_classes, rel_classes, statistics, in_channels)
+            self.context_layer = VCTreeLSTMContext(config, obj_classes, rel_classes, vg_stats.pred_dist, in_channels)
         elif config.MODEL.ROI_RELATION_HEAD.CAUSAL.CONTEXT_LAYER == "vtranse":
             self.context_layer = VTransEFeature(config, obj_classes, rel_classes, in_channels)
         else:
@@ -644,7 +638,7 @@ class CausalAnalysisPredictor(nn.Module):
         # post decoding
         self.hidden_dim = config.MODEL.ROI_RELATION_HEAD.CONTEXT_HIDDEN_DIM
         self.pooling_dim = config.MODEL.ROI_RELATION_HEAD.CONTEXT_POOLING_DIM
-        
+
         if self.use_vtranse:
             self.edge_dim = self.pooling_dim
             self.post_emb = nn.Linear(self.hidden_dim, self.pooling_dim * 2)
@@ -660,14 +654,14 @@ class CausalAnalysisPredictor(nn.Module):
         if self.fusion_type == 'gate':
             self.ctx_gate_fc = nn.Linear(self.pooling_dim, self.num_rel_cls)
             layer_init(self.ctx_gate_fc, xavier=True)
-        
-        # initialize layer parameters 
+
+        # initialize layer parameters
         layer_init(self.post_emb, 10.0 * (1.0 / self.hidden_dim) ** 0.5, normal=True)
         if not self.use_vtranse:
             layer_init(self.post_cat[0], xavier=True)
             layer_init(self.ctx_compress, xavier=True)
         layer_init(self.vis_compress, xavier=True)
-        
+
         assert self.pooling_dim == config.MODEL.ROI_BOX_HEAD.MLP_HEAD_DIM
 
         # convey statistics into FrequencyBias to avoid loading again
@@ -675,7 +669,7 @@ class CausalAnalysisPredictor(nn.Module):
 
         # add spatial emb for visual feature
         if self.spatial_for_vision:
-            self.spt_emb = nn.Sequential(*[nn.Linear(32, self.hidden_dim), 
+            self.spt_emb = nn.Sequential(*[nn.Linear(32, self.hidden_dim),
                                             nn.ReLU(inplace=True),
                                             nn.Linear(self.hidden_dim, self.pooling_dim),
                                             nn.ReLU(inplace=True)
@@ -694,7 +688,7 @@ class CausalAnalysisPredictor(nn.Module):
         self.register_buffer("avg_post_ctx", torch.zeros(self.pooling_dim))
         self.register_buffer("untreated_feat", torch.zeros(self.pooling_dim))
 
-        
+
     def pair_feature_generate(self, roi_features, proposals, rel_pair_idxs, num_objs, obj_boxs, logger, ctx_average=False):
         # encode context infomation
         obj_dists, obj_preds, edge_ctx, binary_preds = self.context_layer(roi_features, proposals, rel_pair_idxs, logger, ctx_average=ctx_average)
@@ -733,8 +727,8 @@ class CausalAnalysisPredictor(nn.Module):
             post_ctx_rep = self.post_cat(ctx_rep)
 
         return post_ctx_rep, pair_pred, pair_bbox, pair_obj_probs, binary_preds, obj_dist_prob, edge_rep, obj_dist_list
-        
-        
+
+
 
     def forward(self, proposals, rel_pair_idxs, rel_labels, rel_binarys, roi_features, union_features, logger=None):
         """
@@ -759,7 +753,7 @@ class CausalAnalysisPredictor(nn.Module):
         if self.separate_spatial:
             union_features, spatial_conv_feats = union_features
             post_ctx_rep = post_ctx_rep * spatial_conv_feats
-        
+
         if self.spatial_for_vision:
             post_ctx_rep = post_ctx_rep * self.spt_emb(pair_bbox)
 
@@ -801,7 +795,7 @@ class CausalAnalysisPredictor(nn.Module):
                 if self.spatial_for_vision:
                     avg_spt_rep = self.spt_emb(self.untreated_spt.clone().detach().view(1, -1))
                 # untreated context
-                avg_ctx_rep = avg_post_ctx_rep * avg_spt_rep if self.spatial_for_vision else avg_post_ctx_rep  
+                avg_ctx_rep = avg_post_ctx_rep * avg_spt_rep if self.spatial_for_vision else avg_post_ctx_rep
                 avg_ctx_rep = avg_ctx_rep * self.untreated_conv_spt.clone().detach().view(1, -1) if self.separate_spatial else avg_ctx_rep
                 # untreated visual
                 avg_vis_rep = self.untreated_feat.clone().detach().view(1, -1)
@@ -848,7 +842,7 @@ class CausalAnalysisPredictor(nn.Module):
             #union_dists = ctx_dists * torch.sigmoid(vis_dists) * torch.sigmoid(frq_dists)                           # balanced recall and mean recall
             #union_dists = ctx_dists * (torch.sigmoid(vis_dists) + torch.sigmoid(frq_dists)) / 2.0                   # good zero-shot Recall
             #union_dists = ctx_dists * torch.sigmoid((vis_dists.exp() + frq_dists.exp() + 1e-9).log())               # good zero-shot Recall, bad for all of the rest
-            
+
         elif self.fusion_type == 'sum':
             union_dists = vis_dists + ctx_dists + frq_dists
         else:

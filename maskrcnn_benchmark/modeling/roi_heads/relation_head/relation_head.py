@@ -1,8 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 import torch
-from torch import nn
-
-from maskrcnn_benchmark.structures.boxlist_ops import boxlist_iou
+from torch.nn import Module
 from ..attribute_head.roi_attribute_feature_extractors import make_roi_attribute_feature_extractor
 from ..box_head.roi_box_feature_extractors import make_roi_box_feature_extractor
 from .roi_relation_feature_extractors import make_roi_relation_feature_extractor
@@ -11,7 +9,7 @@ from .inference import make_roi_relation_post_processor
 from .loss import make_roi_relation_loss_evaluator, make_weaksup_relation_loss_evaluator
 from .sampling import make_roi_relation_samp_processor, make_weaksup_roi_relation_sample_processor
 
-class ROIRelationHead(torch.nn.Module):
+class ROIRelationHead(Module):
     """
     Generic Relation Head class.
     """

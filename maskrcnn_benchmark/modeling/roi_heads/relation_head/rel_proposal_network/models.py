@@ -1,16 +1,10 @@
 from maskrcnn_benchmark.modeling.roi_heads.relation_head.rel_proposal_network.loss import FocalLoss
-import math
-
-import ipdb
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 from maskrcnn_benchmark.config import cfg
-from maskrcnn_benchmark.data import get_dataset_statistics
 from maskrcnn_benchmark.modeling import registry
-from maskrcnn_benchmark.modeling.roi_heads.relation_head.classifier import build_classifier
-from maskrcnn_benchmark.modeling.roi_heads.relation_head.model_motifs import FrequencyBias
 from maskrcnn_benchmark.modeling.roi_heads.relation_head.utils_motifs import (
     obj_edge_vectors,
     encode_box_info,
@@ -570,7 +564,7 @@ class GRCNNRelProp(nn.Module):
                 (len(proposal), len(proposal)), device=device, dtype=pred_logits.dtype
             )
 
-            obj_prob = F.softmax(pred_logits, dim=1) 
+            obj_prob = F.softmax(pred_logits, dim=1)
             obj_pair_prob = torch.cat(
                 (
                     self.sub_fc(obj_prob[pair_idx[:, 0]]),

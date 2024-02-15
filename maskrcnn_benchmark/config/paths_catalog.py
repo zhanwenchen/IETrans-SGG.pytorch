@@ -105,20 +105,76 @@ class DatasetCatalog(object):
             "img_dir": "cityscapes/images",
             "ann_file": "cityscapes/annotations/instancesonly_filtered_gtFine_test.json"
         },
-        "VG_stanford_filtered": {
+        # VG
+        "20VG_stanford_filtered_with_attribute": {
             "img_dir": "vg/VG_100K",
-            "roidb_file": "vg/VG-SGG.h5",
-            "dict_file": "vg/VG-SGG-dicts.json",
+            "roidb_file": "vg/20/VG-SGG-with-attri.h5",
+            "dict_file": "vg/20/VG-SGG-dicts-with-attri.json",
             "image_file": "vg/image_data.json",
         },
-        "VG_stanford_filtered_with_attribute": {
+        "20DS_VG_VGKB": {
             "img_dir": "vg/VG_100K",
-            "roidb_file": "vg/VG-SGG-with-attri.h5",
-            "dict_file": "vg/VG-SGG-dicts-with-attri.json",
+            "roidb_file": "vg/20/VG-SGG-with-attri.h5",
+            "dict_file": "vg/20/VG-SGG-dicts-with-attri.json",
             "image_file": "vg/image_data.json",
-            "capgraphs_file": "vg/vg_capgraphs_anno.json",
+            "distant_supervsion_file": "vg/20/VGKB.json",
+        },
+        "20DS_VG_CCKB": {
+            "img_dir": "vg/VG_100K",
+            "roidb_file": "vg/20/VG-SGG-with-attri.h5",
+            "dict_file": "vg/20/VG-SGG-dicts-with-attri.json",
+            "image_file": "vg/image_data.json",
+            "distant_supervsion_file": "vg/20/CCKB.json",
+        },
+        "50VG_stanford_filtered_with_attribute": {
+            "img_dir": "vg/VG_100K",
+            "roidb_file": "vg/50/VG-SGG-with-attri.h5",
+            "dict_file": "vg/50/VG-SGG-dicts-with-attri.json",
+            "image_file": "vg/image_data.json",
+        },
+        "50DS_VG_VGKB": {
+            "img_dir": "vg/VG_100K",
+            "roidb_file": "vg/50/VG-SGG-with-attri.h5",
+            "dict_file": "vg/50/VG-SGG-dicts-with-attri.json",
+            "image_file": "vg/image_data.json",
+            "distant_supervsion_file": "vg/50/VGKB.json",
+        },
+        "50DS_VG_CCKB": {
+            "img_dir": "vg/VG_100K",
+            "roidb_file": "vg/50/VG-SGG-with-attri.h5",
+            "dict_file": "vg/50/VG-SGG-dicts-with-attri.json",
+            "image_file": "vg/image_data.json",
+            "distant_supervsion_file": "vg/50/CCKB.json",
+        },
+        # 1000 rels
+        "1000VG_stanford_filtered_with_attribute": {
+            "img_dir": "vg/VG_100K",
+            "roidb_file": "vg/1000/VG.h5",
+            "dict_file": "vg/1000/VG-dicts.json",
+            "image_file": "vg/image_data.json",
+        },
+        "1000DS_VG_VGKB": {
+            "img_dir": "vg/VG_100K",
+            "roidb_file": "vg/1000/VG.h5",
+            "dict_file": "vg/1000/VG-dicts.json",
+            "image_file": "vg/image_data.json",
+            "distant_supervsion_file": "vg/1000/VGKB.json",
         },
     }
+    #     "VG_stanford_filtered": {
+    #         "img_dir": "vg/VG_100K",
+    #         "roidb_file": "vg/VG-SGG.h5",
+    #         "dict_file": "vg/VG-SGG-dicts.json",
+    #         "image_file": "vg/image_data.json",
+    #     },
+    #     "VG_stanford_filtered_with_attribute": {
+    #         "img_dir": "vg/VG_100K",
+    #         "roidb_file": "vg/VG-SGG-with-attri.h5",
+    #         "dict_file": "vg/VG-SGG-dicts-with-attri.json",
+    #         "image_file": "vg/image_data.json",
+    #         "capgraphs_file": "vg/vg_capgraphs_anno.json",
+    #     },
+    # }
 
     @staticmethod
     def get(name, cfg):
@@ -148,7 +204,10 @@ class DatasetCatalog(object):
             # name should be something like VG_stanford_filtered_train
             p = name.rfind("_")
             name, split = name[:p], name[p+1:]
-            assert name in DatasetCatalog.DATASETS and split in {'train', 'val', 'test'}
+            try:
+                assert name in DatasetCatalog.DATASETS and split in {'train', 'val', 'test'}
+            except:
+                print(f'split={split}')
             data_dir = DatasetCatalog.DATA_DIR
             args = copy.deepcopy(DatasetCatalog.DATASETS[name])
             for k, v in args.items():

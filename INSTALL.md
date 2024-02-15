@@ -31,7 +31,7 @@ conda create --name ietrans
 conda activate ietrans
 
 # this installs the right pip and dependencies for the fresh python
-conda install python=3.11 ipython scipy h5py
+conda install python=3.11 ipython scipy h5py pandas
 
 # scene_graph_benchmark and coco api dependencies
 pip install ninja yacs cython matplotlib tqdm opencv-python overrides

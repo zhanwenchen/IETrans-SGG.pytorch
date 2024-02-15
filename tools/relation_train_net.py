@@ -45,10 +45,38 @@ except ImportError:
 
 def train(cfg, local_rank, distributed, logger):
     debug_print(logger, 'prepare training')
+    arguments = {}
+    arguments["iteration"] = 0
+    train_data_loader = make_data_loader(
+        cfg,
+        mode='train',
+        is_distributed=distributed,
+        start_iter=arguments["iteration"],
+    )
+    val_data_loaders = make_data_loader(
+        cfg,
+        mode='val',
+        is_distributed=distributed,
+    )
+    data_loaders_test = make_data_loader(
+        cfg,
+        mode='test',
+        is_distributed=distributed,
+    )
+    debug_print(logger, 'end dataloader')
 
-
-    # modules that should be always set in eval mode
-    # their eval() method should be called after model.train() is called
+    if cfg.SOLVER.AUGMENTATION.USE_GRAFT is False:
+        statistics = train_data_loader.dataset.get_statistics()
+        vg_stats = VGStats(
+            statistics['fg_matrix'],
+            statistics['pred_dist'],
+            statistics['obj_classes'],
+            statistics['rel_classes'],
+            statistics['att_classes'],
+            statistics['stats'], # None
+        )
+    model = build_detection_model(cfg)
+    debug_print(logger, 'end model construction')
     eval_modules = (model.rpn, model.backbone, model.roi_heads.box,)
 
     fix_eval_modules(eval_modules)
@@ -70,6 +98,9 @@ def train(cfg, local_rank, distributed, logger):
 
     device = torch.device(cfg.MODEL.DEVICE)
     model.to(device)
+
+    # modules that should be always set in eval mode
+    # their eval() method should be called after model.train() is called
 
     num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     num_batch = cfg.SOLVER.IMS_PER_BATCH
@@ -107,36 +138,7 @@ def train(cfg, local_rank, distributed, logger):
         # load_mapping is only used when we init current model from detection model.
         checkpointer.load(cfg.MODEL.PRETRAINED_DETECTOR_CKPT, with_optim=False, load_mapping=load_mapping)
     debug_print(logger, 'end load checkpointer')
-    train_data_loader = make_data_loader(
-        cfg,
-        mode='train',
-        is_distributed=distributed,
-        start_iter=arguments["iteration"],
-    )
-    val_data_loaders = make_data_loader(
-        cfg,
-        mode='val',
-        is_distributed=distributed,
-    )
-    data_loaders_test = make_data_loader(
-        cfg,
-        mode='test',
-        is_distributed=distributed,
-    )
-    debug_print(logger, 'end dataloader')
 
-    if cfg.SOLVER.AUGMENTATION.USE_GRAFT is False:
-        statistics = train_data_loader.dataset.get_statistics()
-        vg_stats = VGStats(
-            statistics['fg_matrix'],
-            statistics['pred_dist'],
-            statistics['obj_classes'],
-            statistics['rel_classes'],
-            statistics['att_classes'],
-            statistics['stats'], # None
-        )
-    model = build_detection_model(cfg)
-    debug_print(logger, 'end model construction')
     checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
 
     if cfg.SOLVER.PRE_VAL:
@@ -162,9 +164,9 @@ def train(cfg, local_rank, distributed, logger):
         pred_counts = fg_matrix.sum((0,1))
         strategy = cfg.SOLVER.AUGMENTATION.STRATEGY
         bottom_k = cfg.SOLVER.AUGMENTATION.BOTTOM_K
-        alpha = cfg.SOLVER.AUGMENTATION.ALPHA
+        num2aug = cfg.SOLVER.AUGMENTATION.NUM2AUG
         max_batchsize_aug = cfg.SOLVER.AUGMENTATION.MAX_BATCHSIZE_AUG
-        relation_augmenter = RelationAugmenter(pred_counts, bottom_k, strategy, alpha, max_batchsize_aug, cfg=cfg) # TODO: read strategy from scripts
+        relation_augmenter = RelationAugmenter(pred_counts, bottom_k, strategy, num2aug, max_batchsize_aug, cfg=cfg) # TODO: read strategy from scripts
         debug_print(logger, 'end RelationAugmenter')
 
     print_first_grad = True
@@ -172,7 +174,10 @@ def train(cfg, local_rank, distributed, logger):
         if any(len(target) < 1 for target in targets):
             logger.error(f"Iteration={iteration + 1} || Image Ids used for training {_} || targets Length={[len(target) for target in targets]}" )
         data_time = time.time() - end
-        iteration = iteration + 1
+        if use_semantic:
+            images, targets = relation_augmenter.augment(images, targets)
+            # print(f'{iteration}: Augmentation: {num_before} => {len(targets)}')
+        iteration += 1
         arguments["iteration"] = iteration
 
         model.train()
@@ -387,7 +392,7 @@ def main():
     num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     args.distributed = num_gpus > 1
 
-    local_rank = int(os_environ['LOCAL_RANK'])
+    local_rank = int(os_environ.get('LOCAL_RANK', 0))
     if args.distributed:
         torch.cuda.set_device(local_rank)
         torch.distributed.init_process_group(
