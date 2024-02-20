@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import List
 from torch import Tensor
-from torch.utils.data import Dataset
 
 
 class Singleton(type):

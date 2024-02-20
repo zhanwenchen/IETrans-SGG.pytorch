@@ -21,6 +21,9 @@ datasets/*
 *.png
 *.jpg
 *.jpeg
+data/
+data_old/
+tmp/
 
 # Editor temporaries
 *.swn

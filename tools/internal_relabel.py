@@ -218,7 +218,8 @@ def main():
     logger.info("Running with config:\n{}".format(cfg))
     file_names = train(cfg, local_rank, args.distributed, logger)
     synchronize()
-    if dist.is_available() and dist.get_rank() == 0:
+    if local_rank == 0:
+        DATASETS_DIR = os.environ['DATASETS_DIR']
         l = []
         for r in range(num_gpus):
             with open("tmp/" + str(r) + ".pk", "rb") as file:
@@ -226,8 +227,8 @@ def main():
                 l.extend(s)
         dic = {}
         for d in l:
-            dic[d['img_path']] = d
-        rst_l = [dic[k] for k in file_names]
+            dic[os.path.normpath(os.path.join(DATASETS_DIR, '..', d['img_path']))] = d
+        rst_l = [dic[os.path.normpath(os.path.join(DATASETS_DIR, '..', k))] for k in file_names]
         save_path = os.path.join(output_dir, "em_E.pk")
         with open(save_path, "wb") as pickle_file:
             pickle.dump(rst_l, pickle_file)

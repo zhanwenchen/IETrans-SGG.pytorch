@@ -14,10 +14,10 @@ BOX_SCALE = 1024  # Scale at which we have the boxes
 
 class ExTransDataset(torch.utils.data.Dataset):
 
-    def __init__(self, split, img_dir, roidb_file, dict_file, image_file, transforms=None,
+    def __init__(self, split, img_dir, roidb_file, dict_file, image_file, use_graft=None, transforms=None,
                  filter_empty_rels=True, num_im=-1, num_val_im=5000,
                  filter_duplicate_rels=True, filter_non_overlap=True, flip_aug=False, custom_eval=False,
-                 custom_path='', distant_supervsion_file=None, specified_data_file=None, custom_bbox_path=''):
+                 custom_path='', distant_supervsion_file=None, specified_data_file=None, with_clean_classifier=None, custom_bbox_path=''):
         """
         The dataset to conduct external transfer
         Parameters:
@@ -48,7 +48,9 @@ class ExTransDataset(torch.utils.data.Dataset):
         self.filter_non_overlap = filter_non_overlap and self.split == 'train'
         self.filter_duplicate_rels = filter_duplicate_rels and self.split == 'train'
         self.transforms = transforms
-        self.distant_supervision_bank = json.load(open(distant_supervsion_file, "r"))
+
+        with open(distant_supervsion_file, "r") as f:
+            self.distant_supervision_bank = json.load(f)
 
         self.ind_to_classes, self.ind_to_predicates, self.ind_to_attributes = load_info(
             dict_file)  # contiguous 151, 51 containing __background__
@@ -81,7 +83,9 @@ class ExTransDataset(torch.utils.data.Dataset):
         self.filenames = [d for m, d in zip(mask, self.filenames) if m]
         self.gt_attributes = [d for m, d in zip(mask, self.gt_attributes) if m]
         for a, b in zip(self.data, self.filenames):
-            assert a['img_path'] == b
+            assert a['img_path'] == b or b.endswith(a['img_path'])
+
+        self.use_graft = use_graft
 
 
     def __getitem__(self, index):
@@ -127,6 +131,9 @@ class ExTransDataset(torch.utils.data.Dataset):
             'rel_classes': self.ind_to_predicates,
             'att_classes': self.ind_to_attributes,
         }
+        if self.use_graft is False:
+            result['stats'] = None
+
         return result
 
     def get_custom_imgs(self, path):

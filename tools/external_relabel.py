@@ -7,30 +7,23 @@ Basic training script for PyTorch
 # NOTE: this should be the first import (no not reorder)
 from maskrcnn_benchmark.utils.env import setup_environment  # noqa F401 isort:skip
 
+import json
 import argparse
 import os
-import time
-import datetime
 import pickle
 import torch
-from torch.nn.utils import clip_grad_norm_
 import torch.distributed as dist
 
 from maskrcnn_benchmark.config import cfg
-from maskrcnn_benchmark.data import make_data_loader
+from maskrcnn_benchmark.data import make_data_loader, VGStats
 from maskrcnn_benchmark.solver import make_lr_scheduler
 from maskrcnn_benchmark.solver import make_optimizer
-from maskrcnn_benchmark.engine.trainer import reduce_loss_dict
-from maskrcnn_benchmark.engine.inference import inference
 from maskrcnn_benchmark.modeling.detector import build_detection_model
 from maskrcnn_benchmark.utils.checkpoint import DetectronCheckpointer
-from maskrcnn_benchmark.utils.checkpoint import clip_grad_norm
 from maskrcnn_benchmark.utils.collect_env import collect_env_info
-from maskrcnn_benchmark.utils.comm import synchronize, get_rank, all_gather
-from maskrcnn_benchmark.utils.imports import import_file
+from maskrcnn_benchmark.utils.comm import synchronize, get_rank
 from maskrcnn_benchmark.utils.logger import setup_logger, debug_print
-from maskrcnn_benchmark.utils.miscellaneous import mkdir, save_config
-from maskrcnn_benchmark.utils.metric_logger import MetricLogger
+from maskrcnn_benchmark.utils.miscellaneous import mkdir
 
 # See if we can use apex.DistributedDataParallel instead of the torch default,
 # and enable mixed-precision via apex.amp
@@ -42,6 +35,24 @@ except ImportError:
 
 def train(cfg, local_rank, distributed, logger):
     debug_print(logger, 'prepare training')
+    arguments = {}
+    arguments["iteration"] = 0
+    train_data_loader = make_data_loader(
+        cfg,
+        mode='train',
+        is_distributed=distributed,
+        start_iter=arguments["iteration"],
+    )
+    debug_print(logger, 'end dataloader')
+    statistics = train_data_loader.dataset.get_statistics()
+    VGStats(
+        statistics['fg_matrix'],
+        statistics['pred_dist'],
+        statistics['obj_classes'],
+        statistics['rel_classes'],
+        statistics['att_classes'],
+        statistics['stats'], # None
+    )
     model = build_detection_model(cfg)
     debug_print(logger, 'end model construction')
 
@@ -70,7 +81,6 @@ def train(cfg, local_rank, distributed, logger):
     device = torch.device(cfg.MODEL.DEVICE)
     model.to(device)
 
-    num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     num_batch = cfg.SOLVER.IMS_PER_BATCH
     optimizer = make_optimizer(cfg, model, logger, slow_heads=slow_heads, slow_ratio=10.0, rl_factor=float(num_batch))
     scheduler = make_lr_scheduler(cfg, optimizer, logger)
@@ -88,8 +98,6 @@ def train(cfg, local_rank, distributed, logger):
             find_unused_parameters=True,
         )
     debug_print(logger, 'end distributed')
-    arguments = {}
-    arguments["iteration"] = 0
 
     output_dir = cfg.OUTPUT_DIR
 
@@ -106,13 +114,6 @@ def train(cfg, local_rank, distributed, logger):
         # load_mapping is only used when we init current model from detection model.
         checkpointer.load(cfg.MODEL.PRETRAINED_DETECTOR_CKPT, with_optim=False, load_mapping=load_mapping)
     debug_print(logger, 'end load checkpointer')
-    train_data_loader = make_data_loader(
-        cfg,
-        mode='train',
-        is_distributed=distributed,
-        start_iter=arguments["iteration"],
-    )
-    debug_print(logger, 'end dataloader')
 
     logger.info("Start training")
     dic = {}
@@ -140,9 +141,10 @@ def train(cfg, local_rank, distributed, logger):
         if end:
             break
     print(len(dic))
-    import json
-    json.dump(dic, open("tmp/"+str(local_rank)+".json", "w"))
-    pickle.dump(to_save, open("tmp/"+str(local_rank)+".pk", "wb"))
+    with open(f'tmp/{local_rank}.json', "w") as f:
+        json.dump(dic, f)
+    with open(f'tmp/{local_rank}.pk', "wb") as f:
+        pickle.dump(to_save, f)
     return train_data_loader.dataset.filenames
 
 
@@ -151,8 +153,8 @@ def modify_logits(cur_data, rel_logits):
     assert len(possible_rels) == rel_logits.size(0)
     rst_rel_logits = []
     rst_possible_rels = []
-    for i, (rels, logits) in enumerate(zip(possible_rels, rel_logits)):
-        rels = rels if type(rels) is list else [rels]
+    for _, (rels, logits) in enumerate(zip(possible_rels, rel_logits)):
+        rels = rels if isinstance(rels, list) else [rels]
         rels = rels + [0]
         rst_rel_logits.append(logits[rels].cpu().numpy())
         rst_possible_rels.append(rels)
@@ -176,7 +178,6 @@ def main():
         help="path to config file",
         type=str,
     )
-    parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument(
         "--skip-test",
         dest="skip_test",
@@ -195,8 +196,9 @@ def main():
     num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     args.distributed = num_gpus > 1
 
+    local_rank = int(os.environ.get('LOCAL_RANK', 0))
     if args.distributed:
-        torch.cuda.set_device(args.local_rank)
+        torch.cuda.set_device(local_rank)
         torch.distributed.init_process_group(
             backend="nccl", init_method="env://"
         )
@@ -222,20 +224,22 @@ def main():
         config_str = "\n" + cf.read()
         logger.info(config_str)
     logger.info("Running with config:\n{}".format(cfg))
-    # print(args.local_rank)
-    file_names = train(cfg, args.local_rank, args.distributed, logger)
+    file_names = train(cfg, local_rank, args.distributed, logger)
     synchronize()
-    if dist.is_available() and dist.get_rank() == 0:
+    if local_rank == 0:
+        DATASETS_DIR = os.environ['DATASETS_DIR']
         l = []
         for r in range(num_gpus):
-            s = pickle.load(open("tmp/" + str(r) + ".pk", "rb"))
+            with open("tmp/" + str(r) + ".pk", "rb") as f:
+                s = pickle.load(f)
             l.extend(s)
         dic = {}
         for d in l:
-            dic[d['img_path']] = d
+            dic[os.path.normpath(os.path.join(DATASETS_DIR, '..', d['img_path']))] = d
         rst_l = [dic[k] for k in file_names]
         save_path = os.path.join(output_dir, "raw_em_E.pk")
-        pickle.dump(rst_l, open(save_path, "wb"))
+        with open(save_path, "wb") as f:
+            pickle.dump(rst_l, f)
 
 
 if __name__ == "__main__":
